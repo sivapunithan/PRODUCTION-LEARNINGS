@@ -1,23 +1,52 @@
-Pagination — A Practical Guide (for Backend & Frontend)
+# ⚡ Pagination — A Practical Guide (Backend & Frontend)
 
-Efficient pagination keeps your app fast, scalable, and pleasant to use. This guide explains when and how to paginate, shows offset vs cursor strategies with SQL + code examples (Spring Boot / Next.js), and lists gotchas, indexing tips, API contracts, and testing checklists you can paste into any project.
+> Keep your app fast, cheap, and friendly. This guide explains **when** and **how** to paginate, with **offset vs cursor** strategies, SQL & code examples (Spring Boot / Next.js), gotchas, indexing tips, API contracts, and a testing checklist you can paste into any project.
 
-Why paginate?
+<p align="center">
+  <img alt="Status" src="https://img.shields.io/badge/Focus-Pagination-blue">
+  <img alt="Backend" src="https://img.shields.io/badge/Backend-Spring%20Boot-green">
+  <img alt="Frontend" src="https://img.shields.io/badge/Frontend-Next.js-black">
+  <img alt="Databases" src="https://img.shields.io/badge/DB-Postgres%20%7C%20MySQL%20%7C%20SQL%20Server-orange">
+</p>
 
-Performance: Avoid sending thousands of rows per request.
+---
 
-Cost: Less DB work, less bandwidth.
+## 🧭 Table of Contents
+- [Why paginate?](#-why-paginate)
+- [API response shapes](#-api-response-shapes)
+- [Offset vs Cursor (Quick Decision)](#-offset-vs-cursor-quick-decision)
+- [SQL & Indexing Cheatsheet](#-sql--indexing-cheatsheet)
+- [Backend (Spring Boot)](#-backend-spring-boot)
+- [Frontend (Next.js / React)](#-frontend-nextjs--react)
+- [Sorting & Filtering](#-sorting--filtering)
+- [Handling Inserts/Updates/Deletes](#-handling-insertsupdatesdeletes)
+- [Counts: exact vs approximate](#-counts-exact-vs-approximate)
+- [Caching, HTTP, and Links](#-caching-http-and-links)
+- [Error Handling & Edge Cases](#-error-handling--edge-cases)
+- [SEO & Accessibility](#-seo--accessibility)
+- [Testing Checklist](#-testing-checklist)
+- [cURL Examples](#-curl-examples)
+- [TL;DR](#-tldr)
 
-UX: Faster first paint; users browse in small chunks.
+---
 
-Stability: Predictable request/response sizes.
+## 💡 Why paginate?
+**Performance** — Don’t send thousands of rows per request.  
+**Cost** — Less DB work, less bandwidth.  
+**UX** — Faster first paint; users browse in small chunks.  
+**Stability** — Predictable request/response sizes.  
 
-Always paginate at the backend. Client-side-only paging after downloading huge datasets defeats the purpose.
+> ✅ Always paginate on the **backend**. Client-side-only paging after downloading huge datasets defeats the purpose.
 
-API Response Shape (Example)
+---
+
+## 📦 API response shapes
+
+### Link-style (offset-friendly)
+```json
 {
   "count": 35,
-  "next": "http://localhost:8000/api/notes?page=2",
+  "next": "/api/notes?page=2",
   "previous": null,
   "data": [
     {
@@ -29,156 +58,94 @@ API Response Shape (Example)
     }
   ]
 }
+```
 
+### Cursor-style
+```json
+{
+  "data": [ /* ...items... */ ],
+  "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI1LTEwLTE0VDA5OjAzOjE0WiIsImlkIjo0NjN9",
+  "hasMore": true
+}
+```
+> Return `hasMore` or `next/nextCursor`. If `hasMore=false` and `nextCursor=null`, you’re at the end.
 
-Fields
+---
 
-data: Array of items for this page.
+## ⚖️ Offset vs Cursor (Quick Decision)
+| Need | Choose |
+|---|---|
+| Classic paginator (page 1,2,3…), jump to page N | **Offset** |
+| Infinite scroll / “Load more” | **Cursor** |
+| Dataset receives inserts while browsing | **Cursor** |
+| Arbitrary sorting (name, price, …) | **Offset** *(or compound keyset if feasible)* |
+| Very deep pages (page 5,000) | **Cursor** |
 
-count: Total items (optional—may be expensive).
+> Rule of thumb: **Offset = simple & flexible. Cursor = fast at scale & stable under writes.**
 
-next/previous: Absolute or relative links to fetch adjacent pages (optional if you return cursors/tokens instead).
+---
 
-Two Core Strategies
-1) Offset-based Pagination (a.k.a. page/limit)
+## 🧰 SQL & Indexing Cheatsheet
 
-Request
-
-GET /comments?page=2&limit=10
-
-
-Backend logic
-
-offset = (page - 1) * limit
-
-
-SQL (generic)
-
+### Offset (generic SQL)
+```sql
 SELECT *
 FROM comments
 ORDER BY id
-LIMIT 10 OFFSET 10;  -- page=2, limit=10
+LIMIT :limit OFFSET :offset;
+```
 
-
-Pros
-
-Easy to implement & reason about
-
-Works with arbitrary sorting (by name, price, etc.)
-
-Easy to “jump” to page N
-
-Cons
-
-Slows down for deep pages (DB still scans/steps through skipped rows)
-
-Inconsistent if new rows are inserted while the user is paginating (duplicates/missing rows)
-
-SQL Server flavor
-
+### SQL Server (offset)
+```sql
 SELECT *
 FROM comments
 ORDER BY id
-OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY;
+OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+```
 
-
-Tip: For stable ordering, paginate on indexed columns and include a deterministic ORDER BY.
-
-2) Cursor/Keyset Pagination (a.k.a. “seek” method)
-
-Idea: “Give me the next N rows after this row,” using a stable, indexed column (ID or created_at).
-
-Requirements
-
-Column is unique, NOT NULL, monotonic/unchanging, and indexed
-(e.g., (created_at, id) pair to break ties).
-
-Request
-
-GET /comments?after_id=12345&limit=25
-
-
-SQL
-
+### Cursor (single key)
+```sql
 SELECT *
 FROM comments
-WHERE id > 12345
+WHERE id > :cursor
 ORDER BY id ASC
-LIMIT 25;
+LIMIT :limit;
+```
 
-
-With created_at + id (tie-breaker)
-
+### Cursor (created_at, id) with tie-break
+```sql
 SELECT *
 FROM comments
 WHERE (created_at, id) > (:cursorCreatedAt, :cursorId)
 ORDER BY created_at ASC, id ASC
 LIMIT :limit;
+```
 
+### SQL Server keyset (emulated tuple compare)
+```sql
+SELECT TOP (@limit) *
+FROM comments
+WHERE created_at > @cursorCreatedAt
+   OR (created_at = @cursorCreatedAt AND id > @cursorId)
+ORDER BY created_at ASC, id ASC;
+```
 
-Opaque/Continuation Token
+### Indexes you *must* have
+```sql
+-- for offset pagination (ordering by id):
+CREATE INDEX IF NOT EXISTS idx_comments_id ON comments(id);
 
-Instead of exposing after_id=12345, return cursor=eyJhZnRlcl9pZCI6MTIzNDV9 (base64/JSON).
+-- for keyset on (created_at, id):
+CREATE INDEX IF NOT EXISTS idx_comments_created_id ON comments(created_at, id);
+```
+> Prefer **covering indexes** for offset on large tables: paginate primary keys, then join to fetch full rows.
 
-Prevents users from crafting invalid cursors; lets you encode multiple fields.
+---
 
-Pros
+## 🖥️ Backend (Spring Boot)
 
-Very fast for deep pagination (no large offsets)
-
-Resistant to inserts (no shifting windows)
-
-Great for infinite scroll and “Load more”
-
-Cons
-
-Not ideal when users need random page jumps (page 7 directly)
-
-A bit more complex to implement (cursors/tokens)
-
-Choosing the Strategy (Quick Decision)
-
-Need infinite scroll / load more? → Cursor
-
-Need jump to page N from the URL or paginator control? → Offset
-
-Dataset can grow/receive inserts while browsing? → Prefer Cursor
-
-Arbitrary sorting (by various fields)? → Offset (or implement compound keyset if feasible)
-
-API Contract Patterns
-Offset API
-GET /items?page=3&limit=20&sort=created_at:desc
-
-
-Response
-
-{
-  "data": [...],
-  "page": 3,
-  "limit": 20,
-  "count": 12345,
-  "next": "/items?page=4&limit=20&sort=created_at:desc",
-  "previous": "/items?page=2&limit=20&sort=created_at:desc"
-}
-
-Cursor API
-GET /items?limit=20&cursor=eyJjcmVhdGVkQXQiOiIyMDI1LTEwLTE0VDA5OjAwOjAwWiIsImlkIjo0MjF9
-
-
-Response
-
-{
-  "data": [...],
-  "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI1LTEwLTE0VDA5OjAzOjE0WiIsImlkIjo0NjN9",
-  "hasMore": true
-}
-
-
-Return hasMore or next/nextCursor. If hasMore=false and nextCursor=null, you’re at the end.
-
-Backend Examples (Spring Boot)
-Offset with Spring Data Pageable
+### ✅ Offset with `Pageable`
+```java
 @GetMapping("/comments")
 public Page<Comment> list(
     @RequestParam(defaultValue = "0") int page,
@@ -190,25 +157,39 @@ public Page<Comment> list(
     Pageable pageable = PageRequest.of(page, size, s);
     return commentRepository.findAll(pageable);
 }
+```
 
-Keyset (cursor) with created_at, id
+**Recommended response shape adapter**
+```java
+record PageResponse<T>(List<T> data, int page, int limit, long count, String next, String previous) {}
+
+PageResponse<CommentDto> toResponse(Page<Comment> p, int page, int limit, String sort) {
+    String base = "/api/comments?limit=" + limit + "&sort=" + sort + "&page=";
+    String next = p.hasNext() ? base + (page + 1) : null;
+    String prev = p.hasPrevious() ? base + (page - 1) : null;
+    return new PageResponse<>(p.getContent().stream().map(this::toDto).toList(),
+            page, limit, p.getTotalElements(), next, prev);
+}
+```
+
+### ⚡ Cursor (keyset) with `(created_at, id)`
+```java
 @GetMapping("/comments")
 public CursorResponse<CommentDto> list(
     @RequestParam(required = false) String cursor,
     @RequestParam(defaultValue = "20") int limit
 ) {
-    // decodeCursor -> (createdAt, id)
     Instant createdAt = Instant.EPOCH;
     long id = 0L;
 
     if (cursor != null) {
-        var c = cursorCodec.decode(cursor);
+        var c = cursorCodec.decode(cursor); // {createdAt, id}
         createdAt = c.createdAt();
         id = c.id();
     }
 
-    // Fetch strictly "after" the cursor in ascending order
-    var rows = repo.findNext(createdAt, id, limit + 1); // +1 to detect hasMore
+    // fetch limit+1 to check "hasMore"
+    var rows = repo.findNext(createdAt, id, PageRequest.of(0, limit + 1, Sort.by("createdAt").ascending().and(Sort.by("id").ascending())));
 
     boolean hasMore = rows.size() > limit;
     var page = hasMore ? rows.subList(0, limit) : rows;
@@ -218,55 +199,81 @@ public CursorResponse<CommentDto> list(
                              page.get(page.size() - 1).getId())
         : null;
 
-    return new CursorResponse<>(toDtos(page), nextCursor, hasMore);
+    return new CursorResponse<>(page.stream().map(this::toDto).toList(), nextCursor, hasMore);
 }
+```
 
+**Repository (JPQL)**
+```java
+@Query("SELECT c FROM Comment c WHERE (c.createdAt > :createdAt) OR (c.createdAt = :createdAt AND c.id > :id) ORDER BY c.createdAt ASC, c.id ASC")
+List<Comment> findNext(@Param("createdAt") Instant createdAt,
+                       @Param("id") Long id,
+                       Pageable pageable);
+```
 
-Repository (JPA / native)
+**Opaque cursor codec (base64 JSON)**
+```java
+record Cursor(Instant createdAt, long id) {}
 
-@Query("""
-SELECT c
-FROM Comment c
-WHERE (c.createdAt > :createdAt)
-   OR (c.createdAt = :createdAt AND c.id > :id)
-ORDER BY c.createdAt ASC, c.id ASC
-""")
-List<Comment> findNext(Instant createdAt, Long id, Pageable pageable);
+class CursorCodec {
+  String encode(Instant createdAt, long id) {
+    String json = String.format("{"createdAt":"%s","id":%d}", createdAt.toString(), id);
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+  }
+  Cursor decode(String token) {
+    var json = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
+    var node = new ObjectMapper().readTree(json);
+    return new Cursor(Instant.parse(node.get("createdAt").asText()), node.get("id").asLong());
+  }
+}
+```
 
+> **Validation**: cap `limit` (e.g., `1..100`), return `400` for invalid cursors, and keep `ORDER BY` stable across requests.
 
-Ensure an index on (created_at, id).
+---
 
-Frontend Examples (Next.js/React)
-Offset (page buttons)
+## 🌐 Frontend (Next.js / React)
+
+### Offset (classic paginator)
+```tsx
 const [page, setPage] = useState(1);
-const [items, setItems] = useState([]);
+const [items, setItems] = useState<any[]>([]);
+const limit = 20;
 
 useEffect(() => {
-  fetch(`/api/items?page=${page}&limit=20`)
-    .then(r => r.json())
-    .then(d => setItems(d.data));
+  (async () => {
+    const res = await fetch(`/api/items?page=${page}&limit=${limit}`);
+    const json = await res.json();
+    setItems(json.data);
+  })();
 }, [page]);
+```
 
-Cursor (infinite scroll with IntersectionObserver)
+### Cursor (infinite scroll with `IntersectionObserver`)
+```tsx
 const [cursor, setCursor] = useState<string | null>(null);
 const [items, setItems] = useState<any[]>([]);
 const [hasMore, setHasMore] = useState(true);
+const limit = 20;
 
 const load = async () => {
   if (!hasMore) return;
-  const url = cursor ? `/api/items?limit=20&cursor=${encodeURIComponent(cursor)}` : `/api/items?limit=20`;
+  const url = cursor
+    ? `/api/items?limit=${limit}&cursor=${encodeURIComponent(cursor)}`
+    : `/api/items?limit=${limit}`;
   const res = await fetch(url);
   const json = await res.json();
+
   setItems(prev => {
     const seen = new Set(prev.map(x => x.id));
     const deduped = json.data.filter((x: any) => !seen.has(x.id));
     return [...prev, ...deduped];
   });
+
   setCursor(json.nextCursor ?? null);
   setHasMore(Boolean(json.nextCursor));
 };
 
-// attach to sentinel at the bottom
 useEffect(() => {
   const obs = new IntersectionObserver(entries => {
     if (entries[0].isIntersecting) load();
@@ -282,183 +289,108 @@ return (
     <div id="sentinel" />
   </>
 );
+```
 
-Indexing & SQL Tips
-
-Always index columns in your ORDER BY and cursor conditions.
-
-For cursor pagination with (created_at, id), create a composite index on that pair.
-
-For offset pagination, prefer a covering index to reduce lookups (select fewer columns, join by primary key afterward).
-
-Deep offsets are expensive; avoid OFFSET 100000 when possible (use cursor/seek).
-
-For joins, paginate on the driving table after narrowing with filters, then join.
-
-Handling Inserts/Updates/Deletes
-
-Offset: New inserts at the top shift pages → duplicates or skips. Consider deduping on the client; show a “New items” banner and refresh.
-
-Cursor: Stable as long as you paginate by a monotonic key; new rows won’t disrupt already-fetched windows.
-
-Edits/Deletes: A previously fetched item may disappear or change. Be resilient client-side (gracefully remove/update items if refetched).
-
-Sorting & Filtering
-
-Offset supports arbitrary sort fields easily (?sort=name:asc).
-
-Cursor requires the same ORDER BY field as the cursor key.
-For complex sorts, consider compound cursors (e.g., (price, id)).
-
-Counts: exact vs approximate
-
-Returning count on every request can be expensive on large tables.
-
-Options:
-
-Make count optional (?include=count).
-
-Cache counts periodically.
-
-Return approximate counts for huge datasets.
-
-Use window functions or specialized estimators (DB-specific).
-
-Caching, HTTP, and Links
-
-Support ETag / If-None-Match for unchanged pages.
-
-Use Cache-Control for read-heavy endpoints.
-
-Add Link headers
- for next/prev relations (nice for crawlers/clients).
-
-Prefer idempotent GET for paging.
-
-Client Patterns
-
-Infinite scroll: Use cursor. Trigger next load on intersection; dedupe by ID.
-
-Load more button: Same as infinite scroll without auto-trigger.
-
-Classic paginator: Offset/page numbers. Provide First/Prev/Next/Last.
-
-Deduping snippet
-
-const mergeUnique = (prev: any[], next: any[]) => {
+### UX: merge without duplicates
+```ts
+export const mergeUnique = (prev: any[], next: any[]) => {
   const map = new Map(prev.map(x => [x.id, x]));
   next.forEach(x => map.set(x.id, x));
   return Array.from(map.values());
 };
+```
 
-Error Handling & Edge Cases
+---
 
-Validate limit (max cap, e.g., 100).
+## 🔎 Sorting & Filtering
+- **Offset**: arbitrary sorts (`?sort=name:asc`) are trivial.
+- **Cursor**: the cursor column(s) **must** match your `ORDER BY`. For complex sorts, use compound cursors (e.g., `(price, id)`), or fall back to offset.
 
-Validate page ≥ 1; treat invalid values as 1 or return 400.
+---
 
-Invalid/expired cursor → return 400 with guidance; don’t crash.
+## 🔄 Handling Inserts/Updates/Deletes
+- **Offset**: new inserts shift pages → duplicates or gaps. Consider client-side dedupe and a “New items available” refresh banner.
+- **Cursor**: stable as long as the key is monotonic and indexed.
+- **Edits/Deletes**: previously fetched items may change/disappear; client should gracefully update/hide when re-fetched.
 
-Empty pages: return data: [], hasMore: false.
+---
 
-Last page: next/nextCursor is null.
+## 🔢 Counts: exact vs approximate
+- Exact `COUNT(*)` can be expensive on huge tables.
+- Options: make count optional (`?include=count`), **cache** counts periodically, or return **approximate** counts.
+- Window functions / estimators are DB-specific—use carefully.
 
-SEO & Accessibility
+---
 
-If content needs to be indexable (e.g., product lists), provide:
+## 🧱 Caching, HTTP, and Links
+- Support **ETag / If-None-Match** for unchanged pages.
+- Use `Cache-Control` for read-heavy endpoints.
+- Add **Link headers** for `next` / `prev` (great for crawlers/clients).
+- Keep paging endpoints **idempotent (GET)**.
 
-Unique URLs for pages (/products?page=3).
+---
 
-Server-rendered or pre-rendered pages for crawlers.
+## 🛡️ Error Handling & Edge Cases
+- Validate `limit` (e.g., max 100).
+- Validate `page ≥ 1`; treat invalid values as `1` or return `400`.
+- Invalid/expired cursor → return `400` with helpful message.
+- Empty pages: `data: []`, `hasMore: false`.
+- Last page: `next`/`nextCursor` is `null`.
 
-Infinite scroll: ensure accessible keyboard navigation and ARIA live regions for new content.
+---
 
-Do’s & Don’ts
+## ♿ SEO & Accessibility
+- Need indexable lists (e.g., product pages)? Provide unique URLs like `/products?page=3` and server-render/pre-render pages.
+- Infinite scroll: ensure keyboard access and ARIA live regions for newly loaded content.
 
-Do
+---
 
-Enforce sane limit caps.
+## ✅ Testing Checklist
+- [ ] First page returns expected items in correct order.
+- [ ] Middle and last pages behave correctly.
+- [ ] Large page or invalid cursor returns `400` / safe empty result.
+- [ ] `limit` boundaries (1 and max) covered.
+- [ ] Concurrency: insert/delete during pagination doesn’t break order.
+- [ ] Client deduping logic verified for infinite scroll.
+- [ ] Sorting & filtering combinations stay deterministic.
+- [ ] Indices exist and are used (check query plans).
 
-Index your sort/cursor columns.
+---
 
-Keep ordering stable and deterministic.
+## 🧪 cURL Examples
 
-Return next/previous or nextCursor and hasMore.
-
-Don’t
-
-Download all rows to the client and “paginate” there.
-
-Mix different ORDER BY between requests when using cursors.
-
-Use deep offsets for huge tables—switch to keyset.
-
-Testing Checklist
-
-✅ First page returns expected items in correct order.
-
-✅ Middle and last pages behave correctly.
-
-✅ Large page or invalid cursor returns 400/empty safely.
-
-✅ limit boundaries (1 and max) covered.
-
-✅ Concurrency: insert/delete during pagination doesn’t break order.
-
-✅ Client deduping logic verified for infinite scroll.
-
-Quick Reference: SQL Variants
-
-PostgreSQL/MySQL
-
--- Offset
-SELECT * FROM items ORDER BY id LIMIT :limit OFFSET :offset;
-
--- Keyset (id)
-SELECT * FROM items WHERE id > :cursor ORDER BY id ASC LIMIT :limit;
-
--- Keyset (created_at, id)
-SELECT *
-FROM items
-WHERE (created_at, id) > (:cursorCreatedAt, :cursorId)
-ORDER BY created_at ASC, id ASC
-LIMIT :limit;
-
-
-SQL Server
-
--- Offset
-SELECT *
-FROM items
-ORDER BY id
-OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
-
--- Keyset (with created_at, id) — emulate pair comparison
-SELECT TOP (@limit) *
-FROM items
-WHERE created_at > @cursorCreatedAt
-   OR (created_at = @cursorCreatedAt AND id > @cursorId)
-ORDER BY created_at ASC, id ASC;
-
-Example cURL
-
-Offset
-
+**Offset**
+```bash
 curl "http://localhost:8080/api/comments?page=3&limit=20&sort=created_at:desc"
+```
 
-
-Cursor
-
+**Cursor**
+```bash
 curl "http://localhost:8080/api/comments?limit=20&cursor=eyJjcmVhdGVkQXQiOiIyMDI1LTEwLTE0VDA5OjAzOjE0WiIsImlkIjo0NjN9"
+```
 
-TL;DR
+---
 
-Use offset for simple pagers and arbitrary sorts (page 1,2,3…).
+## 🧾 TL;DR
+- Use **offset** for simple pagers & arbitrary sorts (page 1,2,3…).  
+- Use **cursor/keyset** for **speed at scale** + **infinite scroll**.  
+- Always **index** your `ORDER BY` (and cursor) columns.  
+- Keep API contracts consistent (`next/prev` or `nextCursor/hasMore`).  
+- Be deliberate about **count** (omit, cache, or approximate on huge tables).
 
-Use cursor/keyset for speed at scale + infinite scroll.
+---
 
-Always index your ORDER BY (and cursor) columns.
+### 🗺️ Flow (Mermaid)
+```mermaid
+sequenceDiagram
+  participant UI
+  participant API
+  participant DB
 
-Keep API contracts consistent (next/prev or nextCursor/hasMore).
-
-Be deliberate about count (omit, cache, or approximate on huge tables).
+  UI->>API: GET /items?limit=20[&cursor=...]
+  API->>DB: SELECT ... WHERE key > :cursor ORDER BY key LIMIT :limit+1
+  DB-->>API: rows (limit or limit+1)
+  API-->>UI: data + nextCursor + hasMore
+  UI->>UI: render + observe sentinel
+  UI->>API: (when visible) GET /items?cursor=nextCursor
+```
