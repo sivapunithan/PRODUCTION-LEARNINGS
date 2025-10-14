@@ -70,6 +70,9 @@ Copy code
     "flag": 0
   }
 ]
+
+
+
 🧩 Frontend Implementation
 1️⃣ VendorTermsCondition.tsx – Dynamic Form Rendering
 tsx
@@ -88,6 +91,9 @@ Copy code
 )}
 ✅ Now, “Not Applicable” is automatically rendered only when flag === 1 or 4.
 
+
+
+
 2️⃣ VendorTermsConditionDisplay.tsx – Dynamic View Mode
 tsx
 Copy code
@@ -100,6 +106,9 @@ const showNaForQuestion = (term: VendorTermsEntity) => term.flag === 1;
   </label>
 )}
 This ensures the read-only vendor view matches the editable form.
+
+
+
 
 3️⃣ TempVendorDashboard.tsx – Payload Update
 When saving vendor answers, the flag is now included in the payload:
@@ -117,6 +126,10 @@ const payload = Object.entries(vendorTermsAnswers).map(([questionId, ans]) => {
     flag: questionObj?.flag ?? 0   // ✅ Include flag
   };
 });
+
+
+
+
 🧭 Data Flow Diagram
 mermaid
 Copy code
@@ -131,6 +144,8 @@ F --> G
 G --> H[VendorTermsConditionDisplay - View Mode]
 🖼️ Example Output
 ✅ Terms with Flag = 1
+
+
 yaml
 Copy code
 1. I/We have linked Aadhaar and PAN
