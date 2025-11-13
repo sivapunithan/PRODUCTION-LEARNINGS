@@ -1,0 +1,281 @@
+Database Architecture: DAO Pattern, JDBC, DataSource & HikariCP Explained
+
+This document provides a complete, interview-ready explanation of how Java applications connect to databases using DAO Pattern, JDBC, DataSource, and HikariCP.
+It is written for backend engineers preparing for interviews and studying Spring Boot internals.
+
+1. DAO Pattern (Data Access Object)
+What is DAO?
+
+The Data Access Object (DAO) pattern is a structural design pattern used to separate database logic from business logic.
+
+Instead of writing SQL queries inside Controllers or Services, we create DAO classes that handle all database operations.
+
+Purpose
+
+Encapsulate database access
+
+Hide SQL implementation from the rest of the application
+
+Improve modularity, testability, and maintainability
+
+Make switching databases easier (MySQL → Oracle → PostgreSQL)
+
+Example
+public interface UserDao {
+    User findById(int id);
+    void save(User user);
+}
+
+public class UserDaoImpl implements UserDao {
+    @Override
+    public User findById(int id) {
+        // SQL query + JDBC code
+    }
+
+    @Override
+    public void save(User user) {
+        // SQL insert logic
+    }
+}
+
+Why interviews ask DAO questions?
+
+Because DAO shows you understand:
+
+layering
+
+abstraction
+
+database clean architecture
+
+SRP (Single Responsibility Principle)
+
+2. JDBC (Java Database Connectivity)
+What JDBC Actually Does
+
+JDBC is the core low-level technology that Java uses to talk to relational databases.
+
+JDBC provides classes like:
+
+DriverManager
+
+Connection
+
+Statement
+
+PreparedStatement
+
+ResultSet
+
+Behind the scenes:
+
+The JDBC driver registers itself with DriverManager
+
+Java calls DriverManager.getConnection()
+
+Driver returns a DB-specific Connection implementation
+
+SQL is executed through the connection
+
+Raw JDBC Example
+Connection conn = DriverManager.getConnection(url, user, password);
+PreparedStatement stmt = conn.prepareStatement("SELECT * FROM users");
+ResultSet rs = stmt.executeQuery();
+
+
+This is the foundation on which Spring Boot builds everything.
+
+3. DataSource (The Factory for Connections)
+What is a DataSource?
+
+A DataSource is the modern replacement for DriverManager.
+
+It is a factory that creates database connections.
+
+Instead of manually calling:
+
+DriverManager.getConnection()
+
+
+We configure a DataSource, and Spring Boot does:
+
+DataSource.getConnection()
+
+Why DataSource exists?
+
+Because manually opening connections for every request is slow.
+Creating a DB connection involves:
+
+TCP socket creation
+
+authentication
+
+SSL negotiation
+
+handshake
+
+resource allocation
+
+This is expensive.
+
+DataSource enables connection pooling, which increases performance dramatically.
+
+4. What is a Connection Pool?
+Problem Without a Pool
+
+Every request → new DB connection → slow → server overload → DB crash.
+
+Solution
+
+A connection pool:
+
+Creates a fixed number of DB connections at startup
+
+Stores them in memory
+
+Reuses them for multiple requests
+
+Avoids repeated connection creation
+
+Improves performance by 100x
+
+Prevents DB overload
+
+Ensures stability under high traffic
+
+How a Connection Pool Works (Simple Explanation)
+
+Application starts
+
+Pool creates (for example) 5 connections
+
+Request arrives → thread borrows a connection
+
+Query executes (2–50 ms)
+
+Connection returned to pool
+
+Next request reuses the same connection
+
+A single connection can serve hundreds of requests per second.
+
+Important Terms
+Setting	Meaning
+minimumIdle	Minimum connections pool keeps alive
+maximumPoolSize	Maximum simultaneous DB connections allowed
+idleTimeout	Time after which unused connections are removed
+maxLifetime	Maximum lifespan for a connection
+5. HikariCP (The Fastest Connection Pool)
+What is HikariCP?
+
+HikariCP is the default connection pool used in Spring Boot.
+
+It is known for:
+
+very low latency
+
+high throughput
+
+minimal garbage creation
+
+industry-leading performance
+
+Netflix, Airbnb, and many enterprises use HikariCP.
+
+Why Spring Boot chooses Hikari?
+
+Because it’s:
+
+the fastest
+
+the most efficient
+
+the least memory-hungry
+
+extremely stable under heavy load
+
+Default Spring Boot Hikari Settings
+Property	Default
+maximumPoolSize	10
+minimumIdle	10
+connectionTimeout	30 seconds
+idleTimeout	10 minutes
+maxLifetime	30 minutes
+6. How Spring Boot Uses JDBC + DataSource + Hikari Internally
+Flow Diagram
+Your Code
+   ↓
+Repository / DAO
+   ↓
+JdbcTemplate / JPA / Hibernate
+   ↓
+Hikari DataSource
+   ↓
+Connection Pool
+   ↓
+JDBC Driver
+   ↓
+Database (MySQL/Postgres/etc.)
+
+
+Each layer hides the complexity of the layer below.
+
+You only see:
+
+userRepository.findAll();
+
+
+But behind that, a full chain executes.
+
+7. Why Pool Size Does NOT Equal Number of Users
+
+A massive misconception is:
+
+“Pool size 10 means only 10 users can access the database”
+
+This is incorrect.
+
+Pool size determines simultaneous DB operations, NOT number of users.
+
+Example:
+If each DB query takes 10ms:
+
+1 connection = 100 queries/sec
+10 connections = 1000 queries/sec
+
+With 100 app servers:
+
+1000 queries/sec × 100 servers = 100,000 DB queries/sec
+
+
+This is how companies scale to millions of users.
+
+8. Summary Table
+Concept	Explanation
+DAO	Encapsulates DB logic
+JDBC	Core Java DB technology
+DriverManager	Old way of creating connections
+DataSource	Modern way; supports pooling
+Connection Pool	Reuses connections for performance
+HikariCP	Fastest connection pool used by Spring Boot
+Pool Size	Max parallel DB queries, not users
+9. Final High-Level Understanding
+DAO
+
+Handles data logic.
+
+JDBC
+
+Executes SQL.
+
+DataSource
+
+Creates and manages DB connections.
+
+HikariCP
+
+Optimizes and pools connections for speed.
+
+Spring Boot
+
+Uses all of these together invisibly to provide high performance and reliable database access.
