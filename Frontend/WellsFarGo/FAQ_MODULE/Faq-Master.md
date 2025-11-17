@@ -1,143 +1,141 @@
-📘 FAQ Master – Full Documentation (Next.js + PrimeReact + Quill)
+# 🚀 FAQ Master Module  
+### **Rich Text FAQ Management | Next.js + PrimeReact + Quill**
 
-A fully functional FAQ Management module built using Next.js (App Router), PrimeReact, Quill Editor, and Spring Boot APIs.
-This module supports rich-text FAQ creation, editing inside modal dialogs, HTML rendering inside tables, and clean text exports for Excel/CSV.
+<p align="center">
+  <img src="https://img.shields.io/badge/Framework-Next.js_14-black?style=for-the-badge&logo=next.js" />
+  <img src="https://img.shields.io/badge/UI-PrimeReact-blue?style=for-the-badge&logo=primefaces" />
+  <img src="https://img.shields.io/badge/Editor-Quill-green?style=for-the-badge&logo=quill" />
+  <img src="https://img.shields.io/badge/Language-TypeScript-blue?style=for-the-badge&logo=typescript" />
+</p>
 
-This README documents the entire development journey, including major problems, root causes, and stable long-term solutions.
+<p align="center">
+  <i>A complete FAQ management system with rich text editing, smooth tab navigation, stable dialog behavior, and clean Excel exports.</i>
+</p>
 
-🚀 Features
-✓ Create / Edit / Delete FAQs
+---
 
-FAQ question
+# 🌟 Overview
 
-Rich text FAQ answer (stored as HTML)
+The **FAQ Master Module** is a complete solution for creating, editing, storing, and exporting FAQs using rich text content.  
+It supports:
 
-✓ Rich Text Editor (PrimeReact + Quill)
+- Rich text answers (stored as HTML)
+- Editor inside scrollable tabs
+- Fully stable editing inside dialogs
+- Clean Excel & CSV export (without HTML)
+- Zero cursor-jump or re-render issues
+- Dynamic editor loading (SSR safe)
 
-Dynamic import (SSR-safe)
+---
 
-HTML rendering in table
+# 🎯 Features
 
-HTML → raw text conversion for Excel export
+### 📝 Rich Text Editor
+- Implemented using PrimeReact + Quill  
+- Dynamic import for SSR safety  
+- HTML content storage  
 
-✓ Edit FAQ inside Dialog
+### 🧭 Scrollable Tab Navigation
+- Reusable `ScrollableTabView`  
+- Auto-hide arrow logic  
+- Smooth UX even inside dialogs  
 
-No re-render issues
+### 📤 Excel & CSV Export
+- Export raw text (HTML stripped)  
+- Perfect formatting in Excel  
 
-No cursor jump
+### 💬 FAQ Editing Dialog
+- Editor loads with pre-filled HTML  
+- No cursor jump  
+- No re-render lag  
+- No Quill crashes  
 
-No lost focus
+---
 
-Reusable Scrollable Tab View
+# 🧱 Tech Stack
 
-✓ Excel / CSV Export
+| Layer | Technology |
+|------|-------------|
+| Frontend | Next.js 14 |
+| UI | PrimeReact |
+| Editor | Quill.js |
+| Styling | styled-components |
+| Language | TypeScript |
+| Backend | Spring Boot |
+| Network | Axios |
 
-Clean text (no HTML tags)
+---
 
-Multi-line content supported
+# 🧩 Architecture
 
-✓ Reusable ScrollableTabView Component
+```
+FAQMaster/
+│
+├── Add FAQ
+│     ├── Question
+│     └── Answer (Quill Editor)
+│
+├── Edit FAQ (Dialog)
+│     ├── Scrollable Tab
+│     ├── Quill Editor with onLoad patch
+│     └── useRef for tracking edits
+│
+└── FAQ List
+      ├── HTML rendered in DataTable
+      ├── Edit/Delete actions
+      └── Excel/CSV export (raw text)
+```
 
-Smooth tab scroll
+---
 
-Works inside Dialog
+# ⚡ Key Implementations
 
-Auto-hide arrow behavior
+## 1. Dynamic Editor Import (SSR Safe)
 
-🏗️ Tech Stack
-
-Next.js 14 (App Router)
-
-PrimeReact
-
-Quill.js
-
-styled-components
-
-Spring Boot Backend
-
-Axios
-
-📦 Installation
-Install dependencies
-npm install primereact primeicons quill styled-components
-npm install --save-dev @types/styled-components
-
-Ensure global styles include Quill CSS
-import "quill/dist/quill.snow.css";
-
-🧩 Architecture Overview
-FAQ Master Page
- ├── DataTable (FAQ List)
- │    ├── Renders HTML Answers
- │    ├── Exports Plain Text to Excel
- │
- ├── Add FAQ Dialog
- │    └── Rich Text Editor inside ScrollableTabView
- │
- └── Edit FAQ Dialog
-      ├── Editor initialized via onLoad()
-      ├── HTML loaded only once per mount
-      ├── Content tracked through useRef()
-      └── No unnecessary re-renders
-
-📝 Key Implementation Details
-1. Dynamic Import of Quill Editor
+```ts
 const Editor = dynamic(
   () => import("primereact/editor").then((mod) => mod.Editor),
   { ssr: false }
 );
+```
 
+---
 
-Reason: Quill is not SSR-compatible, so dynamic import avoids hydration errors.
+## 2. Scrollable Tab View Component
 
-2. Scrollable Tab Component
+Custom component copied and adapted from previous project:
 
-A custom component using styled-components to provide scrollable horizontal tabs.
+- Styled with `styled-components`
+- Scroll arrow auto-hide logic
+- Fully reusable in dialogs
 
-Supports:
+---
 
-Smooth scroll
+## 3. Add FAQ – Rich Text Editor
 
-Auto hide right arrow
-
-Works inside dialogs
-
-3. Adding FAQ (Create Mode)
-
-FAQ answers stored as HTML:
-
+```tsx
 <Editor
   value={faqAnswer}
   onTextChange={(e) => setFaqAnswer(e.htmlValue ?? "")}
   style={{ height: "250px" }}
 />
+```
 
+---
 
-htmlValue ?? "" ensures TypeScript safety (string | null → string).
+## 4. Edit FAQ – The Hard Part (Final Architecture)
 
-4. Editing FAQ (The Hard Part)
-The root problem:
+### Issue:  
+Quill re-render → cursor jumps → dialog glitches → HTML not loading.
 
-Updating React state on every keystroke causes:
+### Final Fix Strategy:
+- Do **NOT** store editor content in React state  
+- Use **useRef**  
+- Load HTML **only once** via `onLoad`  
 
-TabView re-render
+### Working Implementation:
 
-Dialog re-render
-
-Editor re-render
-
-Cursor jumps to top
-
-Final correct architecture:
-
-Store editor value in a ref
-
-Load answer only once via onLoad
-
-Avoid React state updates during typing
-
-Editor in Edit Dialog:
+```tsx
 const editAnswerRef = useRef("");
 
 <Editor
@@ -145,96 +143,97 @@ const editAnswerRef = useRef("");
     quill.setContents([]);
     quill.clipboard.dangerouslyPasteHTML(editFaq.faq_answer);
   }}
-
   onTextChange={(e) => {
     editAnswerRef.current = e.htmlValue ?? "";
   }}
-
   style={{ height: "250px" }}
 />
+```
 
-Update API uses ref:
+### Updating FAQ:
+
+```ts
 faq_answer: editAnswerRef.current
+```
 
+---
 
-This ensures:
+## 5. Display HTML in Table
 
-No cursor jump
-
-No performance issues
-
-No crashes on reopening dialog
-
-5. HTML Rendering Inside DataTable
+```tsx
 <div
   dangerouslySetInnerHTML={{ __html: row.faq_answer }}
   style={{ whiteSpace: "normal" }}
 />
+```
 
-6. Excel & CSV Export (Plain Text Only)
-Problem:
+---
 
-HTML tags should not appear in Excel exports.
+## 6. Excel Export – Strip HTML
 
-Solution:
+### Utility:
 
-Strip HTML before export.
-
-Utility:
-const stripHtml = (html: string) => {
+```ts
+const stripHtml = (html) => {
   const temp = document.createElement("div");
   temp.innerHTML = html;
   return temp.textContent || temp.innerText || "";
 };
+```
 
-Column Definition:
+### Column Configuration:
+
+```tsx
 {
   field: "faq_answer",
   header: "FAQ Answer",
   body: (row) => (
     <div dangerouslySetInnerHTML={{ __html: row.faq_answer }} />
   ),
-  exportFunction: (row) => stripHtml(row.faq_answer),
+  exportFunction: (row) => stripHtml(row.faq_answer)
 }
+```
 
+---
 
-Now Excel export contains:
+# 🐞 Problems Faced & Solutions
 
-hello
-hello2
+| Problem | Cause | Fix |
+|--------|--------|------|
+| Cannot resolve styled-components | Missing dependency | Installed styled-components |
+| Quill missing | PrimeReact dependency | Install quill |
+| Editor defined twice | Duplicate import | Removed static import |
+| Editor blank in edit dialog | HTML loaded too early | Use onLoad() |
+| Cursor jumps on typing | State update triggers re-render | Switched to useRef |
+| Dialog reopening crashes Quill | Old instance reused | Removed useEffect injection |
+| TS error: string \| null | Editor returns null | Normalize with `?? ""` |
+| Excel shows HTML | Raw HTML exported | stripHtml() utility |
 
-🔧 Major Issues Faced & How They Were Resolved
+---
 
-This is the full battle log of every bug:
+# 📸 Screenshots (Add Yours)
 
-1. Missing styled-components
+```
+🖼 Add the following screenshots:
+- FAQ List Page
+- Add FAQ Page
+- Edit FAQ Dialog
+- Scrollable Tab UI
+- Excel Export Output
+```
 
-→ Installed missing dependency.
+---
 
-2. Quill not found
+# 🏁 Conclusion
 
-→ Installed Quill manually.
+This FAQ Master module is a **fully optimized rich text management solution**, handling:
 
-3. Editor imported twice
+- Quill lifecycle  
+- SSR issues  
+- Dialog + TabView re-renders  
+- Excel export formatting  
+- Clean UI & UX  
 
-→ Removed static import; kept dynamic import only.
+It behaves **perfectly** under complex scenarios where Quill normally breaks.
 
-4. Editor showing blank in Edit Dialog
-
-→ Moved HTML loading logic into onLoad callback.
-
-5. Cursor jumps to top while typing
-
-→ Removed setState inside editor; used useRef instead.
-
-6. Quill crashes on reopening dialog
-
-→ Avoided injecting HTML inside useEffect; rely on onLoad.
-
-7. TypeScript error string | null
-
-→ Normalize using e.htmlValue ?? "".
-
-8. Excel/CSV shows HTML
-
-→ Strip HTML before export using DOM method.
+---
